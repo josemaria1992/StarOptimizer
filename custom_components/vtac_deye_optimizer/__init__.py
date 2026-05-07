@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import voluptuous as vol
 
-from homeassistant.const import CONF_NAME, Platform
+from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, ServiceCall
-import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers.discovery import async_load_platform
 
 from .const import (
     CONF_AUTO_EXECUTE,
@@ -18,6 +16,8 @@ from .const import (
     CONF_CYCLE_COST,
     CONF_EXPORT_ENABLED,
     CONF_EXPORT_FLOOR_SOC,
+    CONF_GRID_CHARGING_CURRENT,
+    CONF_GRID_CHARGING_ENABLE,
     CONF_GRID_MAX_EXPORT_POWER,
     CONF_GRID_POWER,
     CONF_GRID_POWER_SENSORS,
@@ -30,12 +30,12 @@ from .const import (
     CONF_MAX_DISCHARGE_W,
     CONF_MAX_SOC,
     CONF_MIN_CHARGE_A,
-    CONF_PEAK_SHAVING_ENABLE,
-    CONF_PEAK_SHAVING_POWER,
-    CONF_PEAK_SHAVING_THRESHOLD_W,
     CONF_MIN_SOC,
     CONF_MIN_VOLTAGE,
     CONF_NOMINAL_VOLTAGE,
+    CONF_PEAK_SHAVING_ENABLE,
+    CONF_PEAK_SHAVING_POWER,
+    CONF_PEAK_SHAVING_THRESHOLD_W,
     CONF_PRICE_SENSOR,
     CONF_PV_POWER,
     CONF_PV_POWER_SENSORS,
@@ -46,8 +46,6 @@ from .const import (
     CONF_SOC_TARGETS,
     CONF_TARGET_SOC,
     CONF_WORK_MODE,
-    CONF_GRID_CHARGING_ENABLE,
-    CONF_GRID_CHARGING_CURRENT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MODE_CHARGE,
@@ -58,126 +56,111 @@ from .const import (
 from .coordinator import VtacDeyeCoordinator
 from .models import OptimizerConfig
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH, Platform.BUTTON]
+PLATFORMS = ["sensor", "switch", "button"]
 
-CONFIG_SCHEMA = vol.Schema(
-    {
-        DOMAIN: vol.Schema(
-            {
-                vol.Optional(CONF_NAME, default="VTAC Deye Optimizer"): cv.string,
-                vol.Required(CONF_BATTERY_SOC): cv.entity_id,
-                vol.Optional(CONF_PV_POWER): cv.entity_id,
-                vol.Optional(CONF_PV_POWER_SENSORS, default=[]): vol.All(
-                    cv.ensure_list, [cv.entity_id]
-                ),
-                vol.Optional(CONF_LOAD_POWER): cv.entity_id,
-                vol.Optional(CONF_GRID_POWER): cv.entity_id,
-                vol.Optional(CONF_GRID_POWER_SENSORS, default=[]): vol.All(
-                    cv.ensure_list, [cv.entity_id]
-                ),
-                vol.Optional(CONF_BATTERY_CURRENT): cv.entity_id,
-                vol.Optional(CONF_BATTERY_STATE): cv.entity_id,
-                vol.Optional(CONF_PRICE_SENSOR): cv.entity_id,
-                vol.Optional(CONF_WORK_MODE): cv.entity_id,
-                vol.Optional(CONF_GRID_CHARGING_ENABLE): cv.entity_id,
-                vol.Optional(CONF_SOC_TARGET): cv.entity_id,
-                vol.Optional(CONF_SOC_TARGETS, default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
-                vol.Optional(CONF_MAX_CHARGE_CURRENT): cv.entity_id,
-                vol.Optional(CONF_MAX_DISCHARGE_CURRENT): cv.entity_id,
-                vol.Optional(CONF_GRID_CHARGING_CURRENT): cv.entity_id,
-                vol.Optional(CONF_GRID_MAX_EXPORT_POWER): cv.entity_id,
-                vol.Optional(CONF_PEAK_SHAVING_ENABLE): cv.entity_id,
-                vol.Optional(CONF_PEAK_SHAVING_POWER): cv.entity_id,
-                vol.Optional(CONF_BATTERY_CAPACITY_KWH, default=32.14): vol.Coerce(float),
-                vol.Optional(CONF_NOMINAL_VOLTAGE, default=51.2): vol.Coerce(float),
-                vol.Optional(CONF_MIN_VOLTAGE, default=48.0): vol.Coerce(float),
-                vol.Optional(CONF_MIN_SOC, default=15.0): vol.Coerce(float),
-                vol.Optional(CONF_MAX_SOC, default=100.0): vol.Coerce(float),
-                vol.Optional(CONF_TARGET_SOC, default=80.0): vol.Coerce(float),
-                vol.Optional(CONF_EXPORT_FLOOR_SOC, default=35.0): vol.Coerce(float),
-                vol.Optional(CONF_MAX_CHARGE_A, default=250.0): vol.Coerce(float),
-                vol.Optional(CONF_MAX_DISCHARGE_A, default=250.0): vol.Coerce(float),
-                vol.Optional(CONF_MAX_CHARGE_W, default=12000.0): vol.Coerce(float),
-                vol.Optional(CONF_MAX_DISCHARGE_W, default=12000.0): vol.Coerce(float),
-                vol.Optional(CONF_MIN_CHARGE_A, default=10.0): vol.Coerce(float),
-                vol.Optional(CONF_ROUND_STEP_A, default=5.0): vol.Coerce(float),
-                vol.Optional(CONF_CYCLE_COST, default=0.08): vol.Coerce(float),
-                vol.Optional(CONF_PEAK_SHAVING_THRESHOLD_W): vol.Coerce(float),
-                vol.Optional(CONF_EXPORT_ENABLED, default=True): cv.boolean,
-                vol.Optional(CONF_SHADOW_MODE, default=True): cv.boolean,
-                vol.Optional(CONF_AUTO_EXECUTE, default=False): cv.boolean,
-                vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.Coerce(int),
-            }
-        )
-    },
-    extra=vol.ALLOW_EXTRA,
-)
+
+def _as_list(value) -> list[str]:
+    """Parse entity lists from UI strings, YAML lists, or comma-separated values."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).replace(",", "\n")
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _as_optional_str(data: dict, key: str) -> str | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _as_float(data: dict, key: str, default: float) -> float:
+    value = data.get(key, default)
+    if value in (None, ""):
+        return default
+    return float(value)
+
+
+def _as_bool(data: dict, key: str, default: bool) -> bool:
+    value = data.get(key, default)
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() in ("1", "true", "yes", "on")
+
+
+def config_from_data(data: dict) -> OptimizerConfig:
+    """Build runtime config from a config entry or YAML dict."""
+    return OptimizerConfig(
+        battery_soc=str(data[CONF_BATTERY_SOC]),
+        pv_power=_as_optional_str(data, CONF_PV_POWER),
+        pv_power_sensors=_as_list(data.get(CONF_PV_POWER_SENSORS)),
+        load_power=_as_optional_str(data, CONF_LOAD_POWER),
+        grid_power=_as_optional_str(data, CONF_GRID_POWER),
+        grid_power_sensors=_as_list(data.get(CONF_GRID_POWER_SENSORS)),
+        battery_current=_as_optional_str(data, CONF_BATTERY_CURRENT),
+        battery_state=_as_optional_str(data, CONF_BATTERY_STATE),
+        price_sensor=_as_optional_str(data, CONF_PRICE_SENSOR),
+        work_mode=_as_optional_str(data, CONF_WORK_MODE),
+        grid_charging_enable=_as_optional_str(data, CONF_GRID_CHARGING_ENABLE),
+        soc_target=_as_optional_str(data, CONF_SOC_TARGET),
+        soc_targets=_as_list(data.get(CONF_SOC_TARGETS)),
+        max_charge_current=_as_optional_str(data, CONF_MAX_CHARGE_CURRENT),
+        max_discharge_current=_as_optional_str(data, CONF_MAX_DISCHARGE_CURRENT),
+        grid_charging_current=_as_optional_str(data, CONF_GRID_CHARGING_CURRENT),
+        grid_max_export_power=_as_optional_str(data, CONF_GRID_MAX_EXPORT_POWER),
+        peak_shaving_enable=_as_optional_str(data, CONF_PEAK_SHAVING_ENABLE),
+        peak_shaving_power=_as_optional_str(data, CONF_PEAK_SHAVING_POWER),
+        battery_capacity_kwh=_as_float(data, CONF_BATTERY_CAPACITY_KWH, 32.14),
+        nominal_voltage_v=_as_float(data, CONF_NOMINAL_VOLTAGE, 51.2),
+        min_voltage_v=_as_float(data, CONF_MIN_VOLTAGE, 48.0),
+        min_soc_percent=_as_float(data, CONF_MIN_SOC, 15.0),
+        max_soc_percent=_as_float(data, CONF_MAX_SOC, 100.0),
+        target_soc_percent=_as_float(data, CONF_TARGET_SOC, 80.0),
+        export_floor_soc_percent=_as_float(data, CONF_EXPORT_FLOOR_SOC, 35.0),
+        max_charge_a=_as_float(data, CONF_MAX_CHARGE_A, 250.0),
+        max_discharge_a=_as_float(data, CONF_MAX_DISCHARGE_A, 250.0),
+        max_charge_w=_as_float(data, CONF_MAX_CHARGE_W, 12000.0),
+        max_discharge_w=_as_float(data, CONF_MAX_DISCHARGE_W, 12000.0),
+        min_charge_a=_as_float(data, CONF_MIN_CHARGE_A, 10.0),
+        round_step_a=_as_float(data, CONF_ROUND_STEP_A, 5.0),
+        cycle_cost_per_kwh=_as_float(data, CONF_CYCLE_COST, 0.08),
+        peak_shaving_threshold_w=(
+            None
+            if data.get(CONF_PEAK_SHAVING_THRESHOLD_W) in (None, "")
+            else float(data[CONF_PEAK_SHAVING_THRESHOLD_W])
+        ),
+        enable_export=_as_bool(data, CONF_EXPORT_ENABLED, False),
+        shadow_mode=_as_bool(data, CONF_SHADOW_MODE, True),
+        auto_execute=_as_bool(data, CONF_AUTO_EXECUTE, False),
+        scan_interval=int(_as_float(data, CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)),
+    )
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up the optimizer from YAML."""
-    raw = dict(config[DOMAIN])
-    optimizer_config = OptimizerConfig(
-        battery_soc=raw[CONF_BATTERY_SOC],
-        pv_power=raw.get(CONF_PV_POWER),
-        pv_power_sensors=list(raw.get(CONF_PV_POWER_SENSORS, [])),
-        load_power=raw.get(CONF_LOAD_POWER),
-        grid_power=raw.get(CONF_GRID_POWER),
-        grid_power_sensors=list(raw.get(CONF_GRID_POWER_SENSORS, [])),
-        battery_current=raw.get(CONF_BATTERY_CURRENT),
-        battery_state=raw.get(CONF_BATTERY_STATE),
-        price_sensor=raw.get(CONF_PRICE_SENSOR),
-        work_mode=raw.get(CONF_WORK_MODE),
-        grid_charging_enable=raw.get(CONF_GRID_CHARGING_ENABLE),
-        soc_target=raw.get(CONF_SOC_TARGET),
-        soc_targets=list(raw.get(CONF_SOC_TARGETS, [])),
-        max_charge_current=raw.get(CONF_MAX_CHARGE_CURRENT),
-        max_discharge_current=raw.get(CONF_MAX_DISCHARGE_CURRENT),
-        grid_charging_current=raw.get(CONF_GRID_CHARGING_CURRENT),
-        grid_max_export_power=raw.get(CONF_GRID_MAX_EXPORT_POWER),
-        peak_shaving_enable=raw.get(CONF_PEAK_SHAVING_ENABLE),
-        peak_shaving_power=raw.get(CONF_PEAK_SHAVING_POWER),
-        battery_capacity_kwh=raw[CONF_BATTERY_CAPACITY_KWH],
-        nominal_voltage_v=raw[CONF_NOMINAL_VOLTAGE],
-        min_voltage_v=raw[CONF_MIN_VOLTAGE],
-        min_soc_percent=raw[CONF_MIN_SOC],
-        max_soc_percent=raw[CONF_MAX_SOC],
-        target_soc_percent=raw[CONF_TARGET_SOC],
-        export_floor_soc_percent=raw[CONF_EXPORT_FLOOR_SOC],
-        max_charge_a=raw[CONF_MAX_CHARGE_A],
-        max_discharge_a=raw[CONF_MAX_DISCHARGE_A],
-        max_charge_w=raw[CONF_MAX_CHARGE_W],
-        max_discharge_w=raw[CONF_MAX_DISCHARGE_W],
-        min_charge_a=raw[CONF_MIN_CHARGE_A],
-        round_step_a=raw[CONF_ROUND_STEP_A],
-        cycle_cost_per_kwh=raw[CONF_CYCLE_COST],
-        peak_shaving_threshold_w=raw.get(CONF_PEAK_SHAVING_THRESHOLD_W),
-        enable_export=raw[CONF_EXPORT_ENABLED],
-        shadow_mode=raw[CONF_SHADOW_MODE],
-        auto_execute=raw[CONF_AUTO_EXECUTE],
-        scan_interval=raw[CONF_SCAN_INTERVAL],
-    )
+    """Set up integration services."""
+    hass.data.setdefault(DOMAIN, {})
 
-    coordinator = VtacDeyeCoordinator(hass, optimizer_config)
-    coordinator.name = raw.get(CONF_NAME, "VTAC Deye Optimizer")
-    coordinator.entities = []
-    hass.data[DOMAIN] = coordinator
-
-    await coordinator.async_start()
-    await async_load_platform(hass, "sensor", DOMAIN, {}, config)
-    await async_load_platform(hass, "switch", DOMAIN, {}, config)
-    await async_load_platform(hass, "button", DOMAIN, {}, config)
+    async def _first_coordinator() -> VtacDeyeCoordinator | None:
+        coordinators = list(hass.data.get(DOMAIN, {}).values())
+        return coordinators[0] if coordinators else None
 
     async def _handle_replan(call: ServiceCall) -> None:
-        await coordinator.async_refresh(execute=False)
+        coordinator = await _first_coordinator()
+        if coordinator:
+            await coordinator.async_refresh(execute=False)
 
     async def _handle_apply(call: ServiceCall) -> None:
-        await coordinator.async_apply_current()
+        coordinator = await _first_coordinator()
+        if coordinator:
+            await coordinator.async_apply_current()
 
     async def _handle_force(call: ServiceCall) -> None:
-        mode = call.data["mode"]
-        minutes = int(call.data.get("minutes", 60))
-        await coordinator.async_force(mode, minutes)
+        coordinator = await _first_coordinator()
+        if coordinator:
+            await coordinator.async_force(call.data["mode"], int(call.data.get("minutes", 60)))
 
     hass.services.async_register(DOMAIN, "replan", _handle_replan)
     hass.services.async_register(DOMAIN, "apply_current", _handle_apply)
@@ -195,3 +178,28 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         ),
     )
     return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
+    """Set up a config entry created from the UI."""
+    optimizer_config = config_from_data(dict(entry.data))
+    coordinator = VtacDeyeCoordinator(hass, optimizer_config)
+    coordinator.name = entry.data.get(CONF_NAME, "VTAC Deye Optimizer")
+    coordinator.entry_id = entry.entry_id
+    coordinator.entities = []
+
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    await coordinator.async_start()
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    return True
+
+
+async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
+    """Unload a config entry."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    coordinator = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    if coordinator:
+        await coordinator.async_stop()
+    return unload_ok

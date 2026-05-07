@@ -14,7 +14,18 @@ async def async_setup_platform(
     hass: HomeAssistant, config: dict, async_add_entities, discovery_info=None
 ) -> None:
     """Set up optimizer switches."""
-    coordinator: VtacDeyeCoordinator = hass.data[DOMAIN]
+    coordinator: VtacDeyeCoordinator = next(iter(hass.data[DOMAIN].values()))
+    _add_entities(coordinator, async_add_entities)
+
+
+async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> None:
+    """Set up optimizer switches from a config entry."""
+    coordinator: VtacDeyeCoordinator = hass.data[DOMAIN][entry.entry_id]
+    _add_entities(coordinator, async_add_entities)
+
+
+def _add_entities(coordinator: VtacDeyeCoordinator, async_add_entities) -> None:
+    """Add switch entities."""
     entities: list[Entity] = [
         OptimizerAutoSwitch(coordinator),
         OptimizerShadowSwitch(coordinator),
