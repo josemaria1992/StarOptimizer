@@ -1,0 +1,11 @@
+{
+  "domain": "vtac_deye_optimizer",
+  "name": "VTAC Deye Optimizer",
+  "codeowners": [],
+  "config_flow": false,
+  "dependencies": [],
+  "documentation": "https://github.com/custom-components/vtac_deye_optimizer",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "0.1.0"
+}
